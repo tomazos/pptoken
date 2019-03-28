@@ -29,7 +29,7 @@ std::map<std::string, size_t> token_map;
 
 void on_token(const Token& token) { token_map[token.spelling]++; }
 
-void parse(size_t fileindex, const std::string& relpath,
+void parse(size_t /*fileindex*/, const std::string& /*relpath*/,
            const std::filesystem::path& path) {
   std::string input = dvc::load_file(path);
 

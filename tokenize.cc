@@ -314,7 +314,7 @@ struct Tokenizer {
   void emit_eof() {
     header_name_state = 0;
 
-    output.emit_eof();
+    output.emit_eof(rawpos);
   }
 
   Tokenizer(TokenStream& output) : output(output) {}

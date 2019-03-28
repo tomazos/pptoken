@@ -83,7 +83,13 @@ cc_binary(
     srcs = [
         "ppsearch.cc",
     ],
-    deps = [":pptoken_lib"],
+    linkopts = [
+        "-pthread",
+    ],
+    deps = [
+        ":pptoken_lib",
+        "//dvc:sampler",
+    ],
 )
 
 cc_binary(

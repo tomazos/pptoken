@@ -1,0 +1,13 @@
+build --cxxopt='-std=c++17'
+build --copt='-Wall'
+build --copt='-Werror'
+build --copt='-Wextra'
+build --copt='-I/usr/include/freetype2'
+build --host_cxxopt='-std=c++17'
+build --host_cxxopt='-fconcepts'
+build --host_copt='-Wall'
+build --host_copt='-Werror'
+build --host_copt='-Wextra'
+
+
+

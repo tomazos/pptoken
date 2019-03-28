@@ -32,7 +32,7 @@ class IndexReader {
   const FileInfo* file_infos;
   size_t num_files;
 
-  std::string_view filename(const FileInfo& file_info) {
+  std::filesystem::path filename(const FileInfo& file_info) {
     return cstr(file_info.filename_cstr);
   }
 
@@ -71,6 +71,62 @@ class IndexReader {
 
   const std::byte* code;
   size_t code_length;
+
+  struct FileLines {
+    const idx::FileInfo& file_info;
+    const idx::LineInfo& first_line;
+    const idx::LineInfo& last_line;
+  };
+
+  FileLines symbolize(const std::byte* pos, uint32_t len, uint32_t context) {
+    size_t pos_offset = pos - code;
+    DVC_ASSERT_LT(pos_offset, code_length, "symbolize out of bounds");
+    const FileInfo* file_info =
+        std::partition_point(file_infos, file_infos + num_files,
+                             [&](const FileInfo& info) {
+                               return info.code_offset <= pos_offset;
+                             }) -
+        1;
+
+    DVC_ASSERT_GE(file_info, file_infos);
+    DVC_ASSERT_LT(file_info, file_infos + num_files);
+    DVC_ASSERT_GE(pos_offset, file_info->code_offset);
+    uint32_t begin_code = pos_offset - file_info->code_offset;
+    DVC_ASSERT_LT(begin_code, file_info->code_length);
+    uint32_t end_code = begin_code + len;
+    DVC_ASSERT_LT(end_code, file_info->code_length);
+    const idx::LineInfo* file_line_infos = line_infos(*file_info);
+
+    auto find_line = [&](uint32_t code_offset) -> const LineInfo* {
+      const LineInfo* line_info =
+          std::partition_point(file_line_infos,
+                               file_line_infos + file_info->num_lines,
+                               [&](const LineInfo& info) {
+                                 return info.code_offset <= code_offset;
+                               }) -
+          1;
+      DVC_ASSERT_GE(line_info, file_line_infos);
+      DVC_ASSERT_LT(line_info, file_line_infos + file_info->num_lines);
+      return line_info;
+    };
+
+    const LineInfo* first_line = find_line(begin_code);
+    const LineInfo* last_line = find_line(end_code);
+    if (first_line == last_line) last_line++;
+    DVC_ASSERT_LT(last_line, file_line_infos + file_info->num_lines);
+
+    for (size_t i = 0; i < context; i++) {
+      if (first_line > file_line_infos) first_line--;
+      if (last_line + 1 < file_line_infos + file_info->num_lines) last_line++;
+    }
+
+    DVC_ASSERT_GE(first_line, file_line_infos);
+    DVC_ASSERT_LT(first_line, file_line_infos + file_info->num_lines);
+    DVC_ASSERT_GE(last_line, file_line_infos);
+    DVC_ASSERT_LT(last_line, file_line_infos + file_info->num_lines);
+
+    return {*file_info, *first_line, *last_line};
+  }
 
  private:
   std::string_view cstr(size_t offset) { return to_ptr<char>(offset); }

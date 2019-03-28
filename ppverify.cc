@@ -31,15 +31,10 @@ void ppverify(int argc, char** argv) {
     DVC_ASSERT_EQ(code, index.filecode(file_info));
     code += file_info.code_length;
 
-    DVC_DUMP(path);
-    DVC_DUMP(file_length);
-    DVC_DUMP(file_info.code_length);
     const idx::LineInfo* line_infos = index.line_infos(file_info);
     for (size_t i = 0; i < file_info.num_lines; i++) {
       const idx::LineInfo& line_info = line_infos[i];
-      DVC_ASSERT_LT(line_info.file_offset, file_length);
-      DVC_DUMP(line_info.file_offset);
-      DVC_DUMP(line_info.code_offset);
+      DVC_ASSERT_LE(line_info.file_offset, file_length);
       DVC_ASSERT_LT(line_info.code_offset, file_info.code_length);
 
       if (i != 0) {

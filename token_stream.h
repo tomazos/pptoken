@@ -19,7 +19,7 @@ struct TokenStream {
   virtual void emit_preprocessing_op_or_punc(const std::string& spelling) = 0;
   virtual void emit_non_whitespace_char(const std::string& spelling) = 0;
   virtual void emit_raw_newline(uint32_t pos) = 0;
-  virtual void emit_eof() = 0;
+  virtual void emit_eof(uint32_t pos) = 0;
 
   virtual ~TokenStream() {}
 };

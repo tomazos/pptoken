@@ -67,7 +67,7 @@ struct VectorTokenStream : TokenStream {
       throw std::runtime_error("non whitespace char '" + spelling + "'");
   }
 
-  void emit_eof() override {}
+  void emit_eof(uint32_t pos) override { write_newline(pos); }
 
   std::vector<Token> tokens;
   struct NewLine {

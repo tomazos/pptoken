@@ -1,148 +1,114 @@
-#include <unordered_map>
+#include <atomic>
+#include <map>
+#include <random>
+#include <thread>
 
 #include "dvc/file.h"
 #include "dvc/opts.h"
 #include "dvc/program.h"
-#include "dvc/string.h"
+#include "dvc/sampler.h"
+#include "index_reader.h"
+#include "mmapfile.h"
+#include "token_codec.h"
 #include "tokenize.h"
 #include "vector_token_stream.h"
 
 namespace ppt {
 
-template <typename T>
-void rwrite(T t) {
-  std::cout.write((char*)&t, sizeof(T));
-}
+std::filesystem::path DVC_OPTION(index_file, -, dvc::required,
+                                 "input index file");
 
-std::filesystem::path DVC_OPTION(index_path, -, "/opt/actcd19/INDEX",
-                                 "INDEX file");
-std::filesystem::path DVC_OPTION(tokens_path, -, "/opt/actcd19/TOKENS",
-                                 "TOKENS file");
-std::filesystem::path DVC_OPTION(code_path, -, "/opt/actcd19/CODE",
-                                 "CODE file");
-std::string DVC_OPTION(query, q, "", "QUERY");
-std::filesystem::path DVC_OPTION(query_path, -, "", "QUERY file");
-std::filesystem::path DVC_OPTION(result_path, o, dvc::required, "RESULT file");
-size_t DVC_OPTION(match_limit, -, std::numeric_limits<size_t>::max(),
-                  "max matches");
+std::string DVC_OPTION(query, q, dvc::required, "query");
 
-std::unordered_map<std::string, size_t> spelling_map;
+size_t DVC_OPTION(nthreads, n, dvc::required, "number of threads");
 
-size_t search(const std::vector<uint32_t>& query,
-              const std::vector<uint32_t>& file) {
-  if (query.size() > file.size()) return 0;
-  size_t hits = 0;
-  size_t n = file.size() - query.size() + 1;
-  size_t m = query.size();
-  for (size_t i = 0; i < n; i++) {
-    bool hit = true;
-    for (size_t j = 0; j < m; j++)
-      if (file[i + j] != query[j]) {
-        hit = false;
-        break;
-      }
-    if (hit) hits++;
-  }
-  return hits;
-}
+size_t DVC_OPTION(block_size, b, dvc::required, "number of blocks");
+
+constexpr size_t num_matches = 100;
 
 void ppsearch(int argc, char** argv) {
   dvc::program program(argc, argv);
 
-  DVC_ASSERT(exists(index_path));
+  DVC_ASSERT(exists(index_file), "No such file: ", index_file);
+  mmapfile index_mmap(index_file);
+  idx::IndexReader index(index_mmap.get());
 
-  DVC_ASSERT(exists(tokens_path));
+  if (query.empty()) DVC_FAIL("Empty query string.");
 
-  DVC_ASSERT(exists(code_path));
-
-  DVC_LOG("Parsing QUERY...");
-
-  DVC_ASSERT((!exists(query_path) && !query.empty()) ||
-             (exists(query_path) && query.empty()));
-
-  std::string input = (query.empty() ? dvc::load_file(query_path) : query);
-
-  VectorTokenStream query_stream;
-
-  Tokenize(input, query_stream);
-
-  std::vector<Token> query_tokens = query_stream.tokens;
-
-  DVC_LOG("Loading TOKENS...");
-  dvc::file_reader tokensin(tokens_path);
-
-  size_t numentries;
-  tokensin.istream() >> numentries;
-  for (size_t i = 0; i < numentries; i++) {
-    size_t occurences;
-    tokensin.istream() >> occurences;
-    DVC_ASSERT_EQ(tokensin.istream().get(), ' ');
-    size_t spelling_len;
-    tokensin.istream() >> spelling_len;
-    DVC_ASSERT_EQ(tokensin.istream().get(), ' ');
-    std::string spelling(spelling_len, '\0');
-    tokensin.read(spelling.data(), spelling_len);
-    DVC_ASSERT_EQ(tokensin.istream().get(), '\n');
-    spelling_map[spelling] = i;
-    if ((i & (i - 1)) == 0) DVC_LOG("Parsed spelling ", i, " of ", numentries);
+  VectorTokenStream output;
+  try {
+    Tokenize(query, output);
+  } catch (std::exception& e) {
+    DVC_FAIL("Could not tokenize query string `", query,
+             "` because: ", e.what());
   }
-  DVC_LOG("TOKENS loaded");
+  if (output.tokens.empty()) DVC_FAIL("Query string contains no C++ tokens.");
 
-  std::vector<uint32_t> query;
-
-  for (const Token& token : query_tokens) {
-    auto it = spelling_map.find(token.spelling);
-    if (it == spelling_map.end()) {
-      std::cout << "No hits" << std::endl;
-      return;
-    }
-    query.push_back(it->second);
+  std::vector<std::byte> encoded(5 * (output.tokens.size() + 1));
+  std::byte* ptr = encoded.data();
+  for (const Token& token : output.tokens) {
+    uint32_t token_id = index.token_id(token.spelling);
+    if (token_id == 0)
+      DVC_FAIL("No matches found.  (No such token in dataset `", token.spelling,
+               "`)");
+    encode_token(token_id, ptr);
   }
+  encoded.resize(ptr - encoded.data());
+  DVC_ASSERT_GT(encoded.size(), 0);
 
-  DVC_LOG("Loading INDEX...");
-  std::vector<std::string> index;
+  static const std::byte* query_begin = encoded.data();
+  static const std::byte* query_end = encoded.data() + encoded.size();
+  const std::byte* code_section_end = index.code + index.code_length;
 
-  for (std::filesystem::path p : dvc::split("\n", dvc::load_file(index_path))) {
-    if (p.empty()) break;
-    index.push_back(p);
-  }
-  DVC_LOG("INDEX loaded");
+  dvc::sampler<const std::byte*, num_matches> matches;
 
-  dvc::file_reader code(code_path);
+  std::vector<std::thread> threads;
+  std::atomic_size_t next_block = 0;
+  std::atomic_size_t bytes_searched = 0;
+  for (size_t thread_index = 0; thread_index < nthreads; thread_index++)
+    threads.emplace_back([&, thread_index] {
+      while (true) {
+        size_t block = next_block++;
+        const std::byte* start = index.code + block * block_size;
+        if (start >= code_section_end) return;
+        const std::byte* end = start + block_size;
+        if (end > code_section_end) end = code_section_end;
 
-  dvc::file_writer result(result_path, dvc::truncate);
+        for (const std::byte* candidate = start; candidate < end; candidate++) {
+          bool found = true;
+          const std::byte* p = candidate;
+          for (const std::byte* q = query_begin; q < query_end; q++) {
+            if (*p != *q) {
+              found = false;
+              break;
+            }
+            p++;
+          }
+          if (found) {
+            matches(candidate);
+          }
+        }
+      }
+    });
+  for (std::thread& t : threads) t.join();
+  threads.clear();
 
-  DVC_LOG("Searching CODE...");
-  size_t nfiles = code.vread();
-  DVC_ASSERT_EQ(nfiles, index.size());
-  size_t total_hits = 0;
-  for (size_t i = 0; i < nfiles; i++) {
-    if ((i & (i - 1)) == 0)
-      DVC_LOG("Searched ", i, " of ", nfiles, " files: ", total_hits,
-              " hits so far.");
-    size_t filelen = code.vread();
-    size_t startpos = code.tell();
-    std::vector<uint32_t> file;
-    while (code.tell() < startpos + filelen) {
-      file.push_back(code.vread());
-    }
-    DVC_ASSERT_EQ(code.tell(), startpos + filelen);
-    size_t hits = search(query, file);
-    if (hits > 0) result.println(hits, " \"", index.at(i), "\"");
-    total_hits += hits;
-    if (total_hits > match_limit) {
-      DVC_ERROR("hit limit reached: ", i, " files searched with ", total_hits,
-                "hits");
-      return;
-    }
+  DVC_DUMP(matches.size());
+  std::vector<const std::byte*> samples = matches.build_samples();
+  for (const std::byte* sample : samples) {
+    idx::IndexReader::FileLines file_lines =
+        index.symbolize(sample, encoded.size(), 2);
+    std::filesystem::path filename = index.filename(file_lines.file_info);
+    DVC_DUMP(filename);
+    dvc::file_reader file(filename);
+    file.seek(file_lines.first_line.file_offset);
+
+    std::string line = file.read_string(file_lines.last_line.file_offset -
+                                        file_lines.first_line.file_offset);
+    DVC_DUMP(line);
   }
 }
 
 }  // namespace ppt
 
-int main(int argc, char** argv) try {
-  ppt::ppsearch(argc, argv);
-} catch (std::exception& e) {
-  std::cerr << "ERROR: " << e.what() << std::endl;
-  return EXIT_FAILURE;
-}
+int main(int argc, char** argv) { ppt::ppsearch(argc, argv); }

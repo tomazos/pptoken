@@ -47,7 +47,7 @@ size_t vread(std::istream& i) {
   }
 }
 
-std::string parse(size_t fileindex, const std::string& relpath,
+std::string parse(size_t /*fileindex*/, const std::string& /*relpath*/,
                   const std::filesystem::path& path) {
   std::ostringstream o;
   std::string input = dvc::load_file(path);
