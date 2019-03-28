@@ -1,0 +1,3 @@
+[submodule "dvc"]
+	path = dvc
+	url = git@github.com:tomazos/dvc.git
