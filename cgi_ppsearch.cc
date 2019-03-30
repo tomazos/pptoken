@@ -34,7 +34,7 @@ int cgiMain() {
     char query[256];
     cgiFormStringNoNewlines((char*)"q", query, 256);
     fprintf(cgiOut, "<p>Searching for <code>`");
-    cgiValueEscape(query);
+    cgiHtmlEscape(query);
     fprintf(cgiOut, "`</code>...</p>\n");
 
     ppt::CodeSearchResults results =
@@ -42,7 +42,7 @@ int cgiMain() {
 
     if (!results.error.empty()) {
       fprintf(cgiOut, "<p><b>");
-      cgiValueEscape((char*)results.error.c_str());
+      cgiHtmlEscape((char*)results.error.c_str());
       fprintf(cgiOut, "</b></p>");
     } else {
       fprintf(cgiOut,
@@ -56,7 +56,7 @@ int cgiMain() {
         fprintf(cgiOut, "<hr/><p><pre><a href =\"");
         cgiValueEscape((char*)url.c_str());
         fprintf(cgiOut, "\">");
-        cgiValueEscape((char*)relpath.c_str());
+        cgiHtmlEscape((char*)relpath.c_str());
         fprintf(cgiOut, "</a>:%u:</pre></p>\n", results.samples[i].match_line);
 
         fprintf(cgiOut, "<p><pre>");
@@ -64,7 +64,7 @@ int cgiMain() {
         // uint32_t line = results.samples[i].first_line;
         for (const std::string& line : results.samples[i].lines) {
           fprintf(cgiOut, "    ");
-          cgiValueEscape((char*)line.c_str());
+          cgiHtmlEscape((char*)line.c_str());
           fprintf(cgiOut, "<br/>");
         }
         fprintf(cgiOut, "</pre></p>\n");
