@@ -8,6 +8,7 @@ cc_library(
         "index.h",
         "index_reader.h",
         "mmapfile.h",
+        "ppsearch.h",
         "text.h",
         "token_codec.h",
         "token_stream.h",
@@ -57,31 +58,9 @@ cc_binary(
 )
 
 cc_binary(
-    name = "pptoken",
+    name = "cli_ppsearch",
     srcs = [
-        "pptoken.cc",
-    ],
-    linkopts = [
-        "-pthread",
-    ],
-    deps = [":pptoken_lib"],
-)
-
-cc_binary(
-    name = "ppencode",
-    srcs = [
-        "ppencode.cc",
-    ],
-    linkopts = [
-        "-pthread",
-    ],
-    deps = [":pptoken_lib"],
-)
-
-cc_binary(
-    name = "ppsearch",
-    srcs = [
-        "ppsearch.cc",
+        "cli_ppsearch.cc",
     ],
     linkopts = [
         "-pthread",
@@ -93,9 +72,16 @@ cc_binary(
 )
 
 cc_binary(
-    name = "ppother",
+    name = "cgi_ppsearch",
     srcs = [
-        "ppother.cc",
+        "cgi_ppsearch.cc",
     ],
-    deps = [":pptoken_lib"],
+    linkopts = [
+        "-lcgic",
+        "-pthread",
+    ],
+    deps = [
+        ":pptoken_lib",
+        "//dvc:sampler",
+    ],
 )

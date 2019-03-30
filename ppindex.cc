@@ -176,12 +176,14 @@ void ppindex(int argc, char** argv) {
   std::atomic_size_t num_encoded_bytes = 0;
   std::atomic_size_t num_newlines = 0;
   std::unordered_map<std::string, size_t> shas;
+  std::atomic_size_t total_tokens = 0;
+  std::atomic_size_t total_bytes = 0;
   for (size_t thread_index = 0; thread_index < nthreads; thread_index++)
     threads.emplace_back([&, thread_index] {
       for (size_t files2_index = 0; files2_index < files2.size();
            files2_index++)
         if (files2_index % nthreads == thread_index) {
-          std::string code = dvc::load_file(files2[files2_index]);
+          std::string code = dvc::load_file(files2.at(files2_index));
 
           std::vector<std::byte> encoded;
           try {
@@ -202,24 +204,26 @@ void ppindex(int argc, char** argv) {
                 dvc::SHA3({(const char*)encoded.data(), encoded.size()});
             std::lock_guard lock(mu);
             auto it = shas.find(sha);
-            if (it == shas.end()) {
+            if (!output.tokens.empty() && it == shas.end()) {
               shas.emplace_hint(it, std::move(sha), files2_index);
               num_encoded_bytes += encoded.size();
               num_newlines += newlines;
+              total_tokens += output.tokens.size();
+              total_bytes += code.size();
             } else {
-              static std::atomic_size_t limit = 0;
-              skip_file(files2[files2_index], "same sha");
-              if (limit++ < 100)
-                DVC_LOG("Example token equivalent: ", files2.at(files2_index),
-                        " and ", files2.at(it->second));
+              if (output.tokens.empty())
+                skip_file(files2.at(files2_index), "no tokens");
+              else
+                skip_file(files2.at(files2_index), "same sha");
             }
           } catch (std::exception& e) {
             DVC_FATAL("Unexpected bad file: ", e.what(), ": ",
                       files2[files2_index]);
           }
 
-          if (dvc::is_pow2(files_processed++))
-            DVC_LOG("Analyzed ", files_processed,
+          size_t n = files_processed++;
+          if (dvc::is_pow2(n))
+            DVC_LOG("Analyzed ", n,
                     " files. num_encoded_bytes = ", num_encoded_bytes);
         }
     });
@@ -249,6 +253,9 @@ void ppindex(int argc, char** argv) {
   header.file_section_offset = sizeof(idx::IndexHeader);
   header.num_files = files.size();
   header.num_tokens = token_map.size();
+  header.total_tokens = total_tokens;
+  header.total_lines = num_newlines;
+  header.total_bytes = total_bytes;
   index.rwrite(header);
 
   header.file_section_offset = index.tell();
@@ -323,6 +330,7 @@ void ppindex(int argc, char** argv) {
           idx::FileInfo& file_info = file_infos[file_index];
 
           std::string code = dvc::load_file(files[file_index]);
+          file_info.file_length = code.size();
 
           std::vector<std::byte> encoded;
           try {
@@ -463,6 +471,7 @@ void ppindex(int argc, char** argv) {
               encode_token(token_id, ptr);
             }
             code_offsets.push_back(ptr - encoded.data());
+            DVC_ASSERT_EQ(code_offsets.size(), output.tokens.size() + 1);
             encode_token(0, ptr);
             for (size_t i = 0; i < num_lines; i++) {
               line_info[i].code_offset =

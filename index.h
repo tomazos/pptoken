@@ -8,16 +8,19 @@ static_assert(sizeof(size_t) == 8);
 // File starts with...
 struct IndexHeader {
   std::array<char, 4> magic = {'p', 'p', 't', 'I'};
-  uint32_t version = 1;
+  uint32_t version = 2;
   size_t code_section_offset;  // start-of-file relative
   size_t code_section_length;  // bytes
   size_t file_section_offset;  // start-of-file relative
   size_t num_files;
+  size_t total_tokens;
+  size_t total_lines;
+  size_t total_bytes;
   size_t token_id_section_offset;            // start-of-file relative
   size_t token_alphabetical_section_offset;  // start-of-file relative
   size_t num_tokens;
 };
-static_assert(sizeof(IndexHeader) == 64);
+static_assert(sizeof(IndexHeader) == 88);
 static_assert(alignof(IndexHeader) == 8);
 
 // At code_section_offset there is an array of code_section_length bytes
@@ -35,12 +38,13 @@ static_assert(alignof(IndexHeader) == 8);
 // At file_section_offset there is an array of num_files FileInfo...
 struct FileInfo {
   size_t filename_cstr;  // offset start-of-file relative (C string)
-  size_t code_offset;    // relative to IndexHeader.code_section_offset
-  size_t code_length;    // bytes
+  size_t file_length;
+  size_t code_offset;  // relative to IndexHeader.code_section_offset
+  size_t code_length;  // bytes
   size_t num_lines;
   size_t lineinfo_offset;  // start-of-file relative
 };
-static_assert(sizeof(FileInfo) == 40);
+static_assert(sizeof(FileInfo) == 48);
 static_assert(alignof(FileInfo) == 8);
 
 // At token_id_section_offset there is an array of num_tokens TokenInfo

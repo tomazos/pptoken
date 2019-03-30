@@ -67,14 +67,14 @@ struct VectorTokenStream : TokenStream {
       throw std::runtime_error("non whitespace char '" + spelling + "'");
   }
 
-  void emit_eof(uint32_t pos) override { write_newline(pos); }
+  void emit_eof(uint32_t pos) override { write_newline(pos - 1); }
 
   std::vector<Token> tokens;
   struct NewLine {
     uint32_t token_id;
     uint32_t file_offset;
   };
-  std::vector<NewLine> newlines_tokens;
+  std::vector<NewLine> newlines_tokens = {NewLine{0, 0}};
 
  private:
   void write_token(TokenKind token_kind, const std::string& data) {
@@ -82,7 +82,7 @@ struct VectorTokenStream : TokenStream {
   }
 
   void write_newline(uint32_t pos) {
-    newlines_tokens.push_back(NewLine{uint32_t(tokens.size()), pos});
+    newlines_tokens.push_back(NewLine{uint32_t(tokens.size()), pos + 1});
   }
 };
 

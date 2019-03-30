@@ -2,6 +2,7 @@
 
 #include <fcntl.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -27,6 +28,16 @@ class mmapfile {
   }
 
   std::string_view get() { return {(const char*)addr, length}; }
+
+  void lock() {
+    DVC_ASSERT_EQ(0, ::flock(fd, LOCK_EX),
+                  "Unable to lock file: ", strerror(errno));
+  }
+
+  void unlock() {
+    DVC_ASSERT_EQ(0, ::flock(fd, LOCK_UN),
+                  "Unable to unlock file: ", strerror(errno));
+  }
 
   ~mmapfile() {
     DVC_ASSERT_EQ(::munlock(addr, length), 0, "Unable to mlock ", path, ": ",

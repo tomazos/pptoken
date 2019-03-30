@@ -1,11 +1,11 @@
+#pragma once
+
 #include <atomic>
 #include <map>
 #include <random>
 #include <thread>
 
 #include "dvc/file.h"
-#include "dvc/opts.h"
-#include "dvc/program.h"
 #include "dvc/sampler.h"
 #include "index_reader.h"
 #include "mmapfile.h"
@@ -15,42 +15,56 @@
 
 namespace ppt {
 
-std::filesystem::path DVC_OPTION(index_file, -, dvc::required,
-                                 "input index file");
+struct CodeSearchResults {
+  std::string error;
 
-std::string DVC_OPTION(query, q, dvc::required, "query");
+  size_t num_files;
+  size_t num_matches;
 
-size_t DVC_OPTION(nthreads, n, dvc::required, "number of threads");
+  struct Sample {
+    std::filesystem::path file;
+    uint32_t first_line, match_line;
+    std::vector<std::string> lines;
+  };
 
-size_t DVC_OPTION(block_size, b, dvc::required, "number of blocks");
+  std::vector<Sample> samples;
+};
 
-constexpr size_t num_matches = 100;
+template <typename... Args>
+CodeSearchResults make_error(Args&&... args) {
+  CodeSearchResults results;
+  results.error = dvc::concat(std::forward<Args>(args)...);
+  return results;
+}
 
-void ppsearch(int argc, char** argv) {
-  dvc::program program(argc, argv);
+constexpr size_t num_samples = 100;
 
+inline CodeSearchResults codesearch(const std::filesystem::path& index_file,
+                                    const std::string& query, size_t nthreads,
+                                    size_t block_size) {
   DVC_ASSERT(exists(index_file), "No such file: ", index_file);
   mmapfile index_mmap(index_file);
   idx::IndexReader index(index_mmap.get());
 
-  if (query.empty()) DVC_FAIL("Empty query string.");
+  if (query.empty()) return make_error("Empty query string.");
 
   VectorTokenStream output;
   try {
     Tokenize(query, output);
   } catch (std::exception& e) {
-    DVC_FAIL("Could not tokenize query string `", query,
-             "` because: ", e.what());
+    return make_error("Could not tokenize query string `", query,
+                      "` because: ", e.what());
   }
-  if (output.tokens.empty()) DVC_FAIL("Query string contains no C++ tokens.");
+  if (output.tokens.empty())
+    return make_error("Query string contains no C++ tokens.");
 
   std::vector<std::byte> encoded(5 * (output.tokens.size() + 1));
   std::byte* ptr = encoded.data();
   for (const Token& token : output.tokens) {
     uint32_t token_id = index.token_id(token.spelling);
     if (token_id == 0)
-      DVC_FAIL("No matches found.  (No such token in dataset `", token.spelling,
-               "`)");
+      return make_error("No matches found.  (No such token in dataset `",
+                        token.spelling, "`)");
     encode_token(token_id, ptr);
   }
   encoded.resize(ptr - encoded.data());
@@ -60,7 +74,7 @@ void ppsearch(int argc, char** argv) {
   static const std::byte* query_end = encoded.data() + encoded.size();
   const std::byte* code_section_end = index.code + index.code_length;
 
-  dvc::sampler<const std::byte*, num_matches> matches;
+  dvc::sampler<const std::byte*, num_samples> matches;
 
   std::vector<std::thread> threads;
   std::atomic_size_t next_block = 0;
@@ -93,22 +107,29 @@ void ppsearch(int argc, char** argv) {
   for (std::thread& t : threads) t.join();
   threads.clear();
 
-  DVC_DUMP(matches.size());
+  CodeSearchResults results;
+  results.num_files = index.num_files;
+  results.num_matches = matches.size();
   std::vector<const std::byte*> samples = matches.build_samples();
   for (const std::byte* sample : samples) {
+    CodeSearchResults::Sample out_sample;
     idx::IndexReader::FileLines file_lines =
         index.symbolize(sample, encoded.size(), 2);
-    std::filesystem::path filename = index.filename(file_lines.file_info);
-    DVC_DUMP(filename);
-    dvc::file_reader file(filename);
-    file.seek(file_lines.first_line.file_offset);
-
-    std::string line = file.read_string(file_lines.last_line.file_offset -
-                                        file_lines.first_line.file_offset);
-    DVC_DUMP(line);
+    out_sample.file = index.filename(file_lines.file_info);
+    out_sample.first_line = file_lines.first_lineno;
+    out_sample.match_line = file_lines.match_lineno;
+    dvc::file_reader file(out_sample.file);
+    if (file_lines.num_lines > 0) file.seek(file_lines.lines[0].file_offset);
+    for (uint32_t i = 0; i < file_lines.num_lines; i++) {
+      out_sample.lines.push_back(
+          file.read_string(file_lines.lines[i + 1].file_offset -
+                           file_lines.lines[i].file_offset));
+      std::string& s = out_sample.lines.back();
+      if (!s.empty() && s.back() == '\n') s = s.substr(0, s.size() - 1);
+    }
+    results.samples.push_back(std::move(out_sample));
   }
+  return results;
 }
 
 }  // namespace ppt
-
-int main(int argc, char** argv) { ppt::ppsearch(argc, argv); }

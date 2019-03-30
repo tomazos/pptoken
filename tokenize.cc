@@ -382,11 +382,6 @@ struct Tokenizer {
   size_t linenum = 1;
 
   void process(int c0) {
-    if (c0 == '\n') {
-      output.emit_raw_newline(rawpos);
-      linenum++;
-    }
-
     if (!raw_mode) {
       for (int c1 : utf8_decoder.decode(c0))
         for (int c2 : trigraph_decoder.decode(c1))
@@ -401,6 +396,10 @@ struct Tokenizer {
         lookahead = c1;
         next_state();
       }
+    }
+    if (c0 == '\n') {
+      output.emit_raw_newline(rawpos);
+      linenum++;
     }
   }
 
