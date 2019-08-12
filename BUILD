@@ -58,6 +58,16 @@ cc_binary(
 )
 
 cc_binary(
+    name = "pp1gram",
+    srcs = [
+        "pp1gram.cc",
+    ],
+    deps = [
+        ":pptoken_lib",
+    ],
+)
+
+cc_binary(
     name = "cli_ppsearch",
     srcs = [
         "cli_ppsearch.cc",
