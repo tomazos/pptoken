@@ -26,6 +26,7 @@ void ppverify(int argc, char** argv) {
   std::unordered_map<uint32_t, uint32_t> token_counts;
 
   for (size_t i = 0; i < index.num_files; i++) {
+	  if ((i & (i-1)) == 0) DVC_DUMP(i);
     const idx::FileInfo& file_info = index.file_infos[i];
 
     const std::byte* code = index.filecode(file_info);
