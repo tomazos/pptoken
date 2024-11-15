@@ -2,6 +2,7 @@
 
 #include <unordered_map>
 #include <unordered_set>
+#include <stdexcept>
 
 #include "text.h"
 

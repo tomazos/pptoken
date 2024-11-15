@@ -437,6 +437,8 @@ void ppindex(int argc, char** argv) {
   DVC_LOG("Backpatching line info section @ ", lineinfo_offset);
   index.seek(lineinfo_offset);
 
+  DVC_LOG("Creating vector of ", num_newlines);
+
   std::vector<idx::LineInfo> line_infos(num_newlines);
 
   DVC_LOG("Pass 6: Analyzing ", srcdir, ".");

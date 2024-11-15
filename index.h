@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 namespace ppt::idx {
 
 // 64-bit only
